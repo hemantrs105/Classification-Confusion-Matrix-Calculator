@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Class Classification Error Matrix Calculator</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React and ReactDOM CDNs -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- Babel for JSX transformation in the browser (for development only) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        /* Optional: Custom styles for better formula rendering if needed */
+        p {
+            line-height: 1.5; /* Improve readability for formulas */
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gray-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 font-['Inter']">
+
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // Import useState and useEffect hooks from React
+        const { useState, useEffect, useCallback } = React;
+
+        // Main App component for the Classification Error Matrix Calculator
+        const App = () => {
+          // State for the number of classes (N x N matrix)
+          const [numClasses, setNumClasses] = useState(2);
+          // State for the confusion matrix data
+          // It's a 2D array: confusionMatrix[actual_class][predicted_class]
+          const [confusionMatrix, setConfusionMatrix] = useState([]);
+          // State for the currently selected "positive" class for per-class metrics
+          const [selectedClass, setSelectedClass] = useState(0);
+
+          // State variables for calculated metrics
+          const [overallAccuracy, setOverallAccuracy] = useState(0);
+          const [kappaCoefficient, setKappaCoefficient] = useState(0); // Kappa Coefficient
+          const [perClassPrecision, setPerClassPrecision] = useState(0); // Precision for the selected class
+          const [perClassRecall, setPerClassRecall] = useState(0); // Recall for the selected class
+          const [perClassF1Score, setPerClassF1Score] = useState(0); // F1-Score for the selected class
+
+          // New state variables to store Precision and Recall for ALL classes
+          const [allClassPrecisions, setAllClassPrecisions] = useState([]);
+          const [allClassRecalls, setAllClassRecalls] = useState([]);
+
+          // Initialize or resize the confusion matrix when numClasses changes
+          useEffect(() => {
+            // Ensure numClasses is at least 2 to create a valid matrix
+            if (numClasses >= 2) {
+              const newMatrix = Array.from({ length: numClasses }, () =>
+                Array.from({ length: numClasses }, () => 0)
+              );
+              setConfusionMatrix(newMatrix);
+              // Reset selected class if it's out of bounds for the new number of classes
+              if (selectedClass >= numClasses) {
+                setSelectedClass(0);
+              }
+            }
+          }, [numClasses, selectedClass]); // Added selectedClass to dependency array
+
+          // Function to calculate all the classification metrics (memoized for performance)
+          const calculateMetrics = useCallback(() => {
+            // Defensive check: ensure matrix is correctly structured before proceeding
+            if (!confusionMatrix || confusionMatrix.length !== numClasses || (numClasses > 0 && confusionMatrix.some(row => row.length !== numClasses))) {
+              setOverallAccuracy(0);
+              setKappaCoefficient(0); // Reset Kappa
+              setPerClassPrecision(0);
+              setPerClassRecall(0);
+              setPerClassF1Score(0);
+              setAllClassPrecisions(Array(numClasses).fill(0)); // Reset all class precisions
+              setAllClassRecalls(Array(numClasses).fill(0)); // Reset all class recalls
+              return;
+            }
+
+            let totalSamples = 0;
+            let correctPredictions = 0;
+            const actualTotals = Array(numClasses).fill(0); // Row sums (Sum of Actual for each class)
+            const predictedTotals = Array(numClasses).fill(0); // Column sums (Sum of Predicted for each class)
+
+            // Calculate total samples, correct predictions, and row/column totals
+            for (let i = 0; i < numClasses; i++) {
+              for (let j = 0; j < numClasses; j++) {
+                const value = confusionMatrix[i][j];
+                totalSamples += value;
+                actualTotals[i] += value; // Sum for actual class i (row i)
+                predictedTotals[j] += value; // Sum for predicted class j (column j)
+                if (i === j) {
+                  correctPredictions += value;
+                }
+              }
+            }
+
+            // Overall Accuracy (observed agreement, p_o)
+            const po = totalSamples > 0 ? correctPredictions / totalSamples : 0;
+            setOverallAccuracy(po);
+
+            // Expected agreement by chance (p_e) for Kappa
+            let pe = 0;
+            if (totalSamples > 0) {
+              for (let k = 0; k < numClasses; k++) {
+                pe += (actualTotals[k] * predictedTotals[k]);
+              }
+              pe = pe / (totalSamples * totalSamples);
+            }
+            
+            // Kappa Coefficient
+            const kappa = (1 - pe) > 0 ? (po - pe) / (1 - pe) : 0;
+            setKappaCoefficient(kappa);
+
+            // Calculate Precision and Recall for ALL classes
+            const newAllClassPrecisions = [];
+            const newAllClassRecalls = [];
+
+            for (let currentClass = 0; currentClass < numClasses; currentClass++) {
+              let tp = 0; // True Positives for currentClass
+              let fp = 0; // False Positives for currentClass
+              let fn = 0; // False Negatives for currentClass
+
+              // TP: Element where actual = predicted = currentClass
+              tp = confusionMatrix[currentClass][currentClass];
+
+              // FP: Sum of elements in the 'predicted' column of currentClass, excluding TP
+              for (let i = 0; i < numClasses; i++) {
+                if (i !== currentClass) {
+                  fp += confusionMatrix[i][currentClass];
+                }
+              }
+
+              // FN: Sum of elements in the 'actual' row of currentClass, excluding TP
+              for (let j = 0; j < numClasses; j++) {
+                if (j !== currentClass) {
+                  fn += confusionMatrix[currentClass][j];
+                }
+              }
+
+              // Precision for current class
+              const prec = (tp + fp) > 0 ? tp / (tp + fp) : 0;
+              newAllClassPrecisions.push(prec);
+
+              // Recall for current class
+              const rec = (tp + fn) > 0 ? tp / (tp + fn) : 0;
+              newAllClassRecalls.push(rec);
+            }
+
+            setAllClassPrecisions(newAllClassPrecisions);
+            setAllClassRecalls(newAllClassRecalls);
+
+            // Set per-class metrics for the currently selected class
+            if (selectedClass >= 0 && selectedClass < numClasses) {
+              setPerClassPrecision(newAllClassPrecisions[selectedClass]);
+              setPerClassRecall(newAllClassRecalls[selectedClass]);
+              const f1 = (newAllClassPrecisions[selectedClass] + newAllClassRecalls[selectedClass]) > 0
+                         ? (2 * newAllClassPrecisions[selectedClass] * newAllClassRecalls[selectedClass]) / (newAllClassPrecisions[selectedClass] + newAllClassRecalls[selectedClass])
+                         : 0;
+              setPerClassF1Score(f1);
+            } else {
+              setPerClassPrecision(0);
+              setPerClassRecall(0);
+              setPerClassF1Score(0);
+            }
+          }, [confusionMatrix, numClasses, selectedClass]); // Memoization dependencies
+
+          // Recalculate metrics whenever the confusion matrix or selected class changes
+          // Trigger calculation only if the matrix is ready and consistent
+          useEffect(() => {
+            if (numClasses >= 2 && confusionMatrix.length === numClasses && confusionMatrix.every(row => row.length === numClasses)) {
+              calculateMetrics();
+            }
+          }, [confusionMatrix, selectedClass, numClasses, calculateMetrics]); // Include calculateMetrics in dependencies
+
+          // Handler for changing the number of classes
+          const handleNumClassesChange = (e) => {
+            const value = parseInt(e.target.value, 10);
+            // Ensure value is at least 2 (for a matrix)
+            setNumClasses(isNaN(value) || value < 2 ? 2 : value);
+          };
+
+          // Handler for updating a specific cell in the confusion matrix
+          const handleMatrixInputChange = (rowIndex, colIndex) => (e) => {
+            const value = parseInt(e.target.value, 10);
+            const newMatrix = confusionMatrix.map((row, rIdx) =>
+              row.map((cell, cIdx) => {
+                if (rIdx === rowIndex && cIdx === colIndex) {
+                  return isNaN(value) || value < 0 ? 0 : value; // Ensure non-negative integers
+                }
+                return cell;
+              })
+            );
+            setConfusionMatrix(newMatrix);
+          };
+
+          return (
+            <div className="max-w-4xl w-full bg-white p-8 rounded-xl shadow-lg space-y-8">
+              <h1 className="text-3xl font-extrabold text-gray-900 text-center mb-6">
+                Multi-Class Classification Error Matrix Calculator
+              </h1>
+
+              {/* Number of Classes Input */}
+              <div className="flex items-center justify-center mb-6 p-4 bg-purple-50 rounded-lg shadow-sm">
+                <label htmlFor="num-classes" className="text-gray-700 font-medium mr-4">Number of Classes (N):</label>
+                <input
+                  type="number"
+                  id="num-classes"
+                  className="w-24 p-2 border border-gray-300 rounded-md shadow-sm focus:ring-purple-500 focus:border-purple-500 text-sm"
+                  value={numClasses}
+                  onChange={handleNumClassesChange}
+                  min="2" // Minimum 2 classes for a confusion matrix
+                />
+              </div>
+
+              {/* Confusion Matrix Input and Display */}
+              <div className="mt-8">
+                <h2 className="text-2xl font-bold text-gray-900 mb-4 text-center">Confusion Matrix (Actual vs. Predicted)</h2>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 rounded-lg shadow-md overflow-hidden">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rounded-tl-lg"></th>
+                        <th scope="col" colSpan={numClasses} className="px-6 py-3 text-center text-sm font-medium text-gray-700 uppercase tracking-wider bg-gray-200">Predicted Class</th>
+                      </tr>
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actual Class</th>
+                        {Array.from({ length: numClasses }).map((_, i) => (
+                          <th key={`pred-header-${i}`} scope="col" className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Class {i}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {confusionMatrix.map((row, rowIndex) => (
+                        <tr key={`row-${rowIndex}`}>
+                          <th className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 bg-gray-50">
+                            Class {rowIndex}
+                          </th>
+                          {row.map((cell, colIndex) => (
+                            <td key={`cell-${rowIndex}-${colIndex}`} className="px-4 py-2 whitespace-nowrap text-center text-sm text-gray-900">
+                              <input
+                                type="number"
+                                className={`w-20 p-2 border border-gray-300 rounded-md shadow-sm text-center focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+                                  rowIndex === colIndex ? 'bg-blue-100 font-semibold' : 'bg-gray-50'
+                                }`}
+                                value={confusionMatrix[rowIndex][colIndex]}
+                                onChange={handleMatrixInputChange(rowIndex, colIndex)}
+                                min="0"
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Metrics display section */}
+              <div className="mt-8 p-6 bg-purple-50 rounded-xl shadow-lg">
+                <h2 className="text-2xl font-bold text-purple-800 mb-4 text-center">Calculated Metrics</h2>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-center">
+                  <MetricCard title="Overall Accuracy" value={overallAccuracy.toFixed(4)} tooltip="Total correct predictions divided by total samples. Also known as Observed Agreement (po)." />
+                  <MetricCard title="Kappa Coefficient" value={kappaCoefficient.toFixed(4)} tooltip="Measures the agreement between predicted and actual classifications, accounting for chance agreement. Range is -1 to 1." />
+                  
+                  {/* Display metrics for currently selected class */}
+                  <MetricCard title={`Precision (Class ${selectedClass})`} value={perClassPrecision.toFixed(4)} tooltip={`Proportion of positive identifications for Class ${selectedClass} that were actually correct.`} />
+                  <MetricCard title={`Recall (Class ${selectedClass})`} value={perClassRecall.toFixed(4)} tooltip={`Proportion of actual positives for Class ${selectedClass} that were identified correctly.`} />
+                  <MetricCard title={`F1-Score (Class ${selectedClass})`} value={perClassF1Score.toFixed(4)} tooltip={`Harmonic mean of Precision and Recall for Class ${selectedClass}.`} />
+                </div>
+              </div>
+
+              {/* Per-Class Accuracy Table */}
+              <div className="mt-8 p-6 bg-yellow-50 rounded-xl shadow-lg">
+                <h2 className="text-2xl font-bold text-yellow-800 mb-4 text-center">Per-Class Accuracies</h2>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200 rounded-lg shadow-md overflow-hidden">
+                    <thead className="bg-yellow-100">
+                      <tr>
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider rounded-tl-lg">Class</th>
+                        <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">User's Accuracy (Precision)</th>
+                        <th scope="col" className="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider rounded-tr-lg">Producer's Accuracy (Recall)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {Array.from({ length: numClasses }).map((_, i) => (
+                        <tr key={`class-metrics-${i}`}>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 text-center">Class {i}</td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">
+                            {allClassPrecisions[i] !== undefined ? allClassPrecisions[i].toFixed(4) : 'N/A'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-center">
+                            {allClassRecalls[i] !== undefined ? allClassRecalls[i].toFixed(4) : 'N/A'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Explanation of terms */}
+              <div className="mt-8 p-6 bg-gray-50 rounded-xl shadow-md">
+                <h2 className="text-2xl font-bold text-gray-900 mb-4 text-center">Understanding the Metrics</h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-700">
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Overall Accuracy:</h3>
+                    <p>The proportion of total samples that were correctly classified across all classes. Formula: po = (Total Correct Predictions) / (Total Samples)</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Kappa Coefficient:</h3>
+                    <p>Measures the agreement between predicted and actual classifications, accounting for chance agreement. Kappa = (po - pe) / (1 - pe) Where pe = Sum of ( (Actual Class_k Total) * (Predicted Class_k Total) ) for k=1 to N, all divided by (Total Samples)^2</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Precision (for a specific class):</h3>
+                    <p>Of all instances predicted as this class, how many were actually this class. Formula: TP / (TP + FP)</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">Recall (Sensitivity, for a specific class):</h3>
+                    <p>Of all actual instances of this class, how many were correctly predicted as this class. Formula: TP / (TP + FN)</p>
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-800">F1-Score (for a specific class):</h3>
+                    <p>The harmonic mean of Precision and Recall. It provides a single score that balances both. Formula: 2 * ((Precision * Recall) / (Precision + Recall))</p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <h3 className="font-semibold text-gray-800">In a multi-class confusion matrix, for a "Class X":</h3>
+                    <ul className="list-disc list-inside mt-2">
+                      <li><span className="font-semibold">True Positives (TP):</span> The number of times Class X was correctly predicted as Class X. (Cell: `Matrix[X][X]`)</li>
+                      <li><span className="font-semibold">False Positives (FP):</span> The number of times other classes were incorrectly predicted as Class X. (Sum of column X, excluding `Matrix[X][X]`)</li>
+                      <li><span className="font-semibold">False Negatives (FN):</span> The number of times Class X was incorrectly predicted as another class. (Sum of row X, excluding `Matrix[X][X]`)</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        };
+
+        // Reusable component for displaying a single metric card
+        const MetricCard = ({ title, value, tooltip }) => (
+          <div className="bg-white p-4 rounded-lg shadow-sm border border-purple-200 relative group">
+            <h3 className="text-lg font-medium text-gray-700 mb-1">{title}</h3>
+            <p className="text-3xl font-bold text-purple-600">{value}</p>
+            {/* Tooltip for explanation on hover */}
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max p-2 text-xs text-white bg-gray-800 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none">
+              {tooltip}
+              <div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-800"></div>
+            </div>
+          </div>
+        );
+
+        // Render the App component into the 'root' div using createRoot
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
